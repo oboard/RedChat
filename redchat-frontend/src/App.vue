@@ -20,7 +20,7 @@ interface Message {
 const messages = ref<Record<string, Message>>({});
 const messageContent = ref('');
 // const joinConversationId = ref('');
-const userConversations = ref([]);
+const userConversations = ref<string[]>([]);
 const currentConversationId = ref('');
 
 watch(currentConversationId, () => {
@@ -53,6 +53,25 @@ const fetch2 = (input: string, init?: RequestInit): Promise<Response> => {
   return fetch(`http://${serverHost}/api/v1` + input, init);
 }
 
+const genColor = (uuid: string) => {
+  if (uuid == undefined || uuid == null || uuid.length < 5) {
+    return "";
+  }
+  const seed = Number.parseInt(uuid.replace(/-/g, "").slice(0, 8), 16);
+  const colors = [
+    "chat-bubble-primary",
+    "chat-bubble-secondary",
+    "chat-bubble-accent",
+    "chat-bubble-neutral",
+    "chat-bubble-success",
+    "chat-bubble-warning",
+    "chat-bubble-error",
+  ];
+  const color = colors[seed % 7];
+  return color;
+}
+
+
 // 发送消息方法
 const sendMessage = () => {
   const message = {
@@ -77,7 +96,7 @@ const getChatHistory = () => {
   fetch2(`/history?conversationId=${currentConversationId.value}`)
     .then(response => response.json())
     .then(data => {
-      messages.value = data.messages?.map((message: Message) => {
+      messages.value = data.msgs?.map((message: Message) => {
         message.status = 0; // 设置状态为已接收
         return message;
       })
@@ -98,6 +117,39 @@ const getChatHistory = () => {
 //     .catch(error => console.error('加入会话错误：', error));
 // };
 
+// 通过时间戳获取时间，如果时间不是很久，就显示多久之前，否则显示具体时间
+function getTime(time: number | undefined) {
+  if (time === undefined) return "发送中";
+  const now = new Date().getTime();
+  const diff = now - time;
+  if (diff < 1000 * 60) {
+    // return `${Math.floor(diff / 1000)}秒前`;
+    return "刚刚";
+  }
+  if (diff < 1000 * 60 * 60) {
+    return `${Math.floor(diff / (1000 * 60))}分钟前`;
+  }
+  if (diff < 1000 * 60 * 60 * 24) {
+    return `${Math.floor(diff / (1000 * 60 * 60))}小时前`;
+    // } else if (diff < 1000 * 60 * 60 * 24 * 30) {
+    //   return `${Math.floor(diff / (1000 * 60 * 60 * 24))}天前`;
+  }
+  return new Date(time).toLocaleString();
+}
+
+const createConversation = (toUserId: number) => {
+  fetch2('/create', {
+    body: JSON.stringify({
+      from: userId.value,
+      to: toUserId,
+    }),
+    method: 'POST',
+  }).then(response => response.json())
+    .then(data => {
+      userConversations.value.push(`${data?.conversationId}`);
+    }).catch(error => console.error('创建会话错误：', error));
+}
+
 const getUserConversations = () => {
   fetch2(`/list?userId=${userId.value}`)
     .then(response => response.json())
@@ -107,6 +159,15 @@ const getUserConversations = () => {
     .catch(error => console.error('获取用户会话错误：', error));
 };
 
+const onCreateBtn = () => {
+  let id = prompt('请输入对方的用户 ID')
+  if (id === null) {
+
+    return;
+  }
+  createConversation(Number.parseInt(id))
+}
+
 // 生命周期钩子
 onMounted(() => {
   connectWebSocket();
@@ -115,34 +176,133 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="fixed top-0 left-0 h-[calc(100%-72px)] z-10 w-1/4 bg-base-200 p-4 flex flex-col">
-    <h2 class="text-2xl font-semibold mb-4">会话列表</h2>
+  <div class="fixed top-0 left-0 h-[calc(100%-72px)] z-10 w-1/4 bg-base-200 p-4 flex flex-col items-center gap-2">
+
+    <h2 class="text-2xl font-semibold mb-4 hidden md:block">会话列表</h2>
+    <button type="button" class="btn btn-primary btn-circle text-xl" @click="onCreateBtn"> + </button>
+
     <ul class="w-full flex-1 space-y-2">
       <li v-for="conversation in userConversations" :key="conversation" class="w-full">
-        <label class="btn pl-2 label cursor-pointer">
+        <label class="btn pl-2 label cursor-pointer h-fit">
           <span class="label-text">{{ conversation }}</span>
           <input type="radio" name="radio-10" class="radio checked:bg-blue-500" v-model="currentConversationId"
             :value="conversation" />
         </label>
-        <!-- <input :id="`conversation-radio-${conversation}`" class="radio" type="radio"
-                        v-model="currentConversationId" :value="conversation">
-                    <label :for="`conversation-radio-${conversation}`"
-                        class="w-full flex justify-center cursor-pointer bg-base-300 transition duration-300 ease-in-out">
-                        {{ conversation }}
-                    </label> -->
       </li>
     </ul>
   </div>
-  <div class="absolute top-4 pb-[100px] pl-[calc(25%+32px)]">
-    <ul class="space-y-2">
-      <li v-for="message of messages" :key="message.uuid"
-        :class="message.userId === userId ? 'message sender' : 'message receiver'">
-        <span>{{ message.content }}</span>
-        <small>{{ message.time }}</small>
-        <span v-if="message.status === 1">发送中...</span>
-        <span v-if="message.status === 2">发送失败</span>
-      </li>
-    </ul>
+  <div class="absolute top-4 pb-[100px] pl-[calc(25%+32px)] w-full">
+    <div className="chatbox w-full">
+      <div v-for="item of messages" :class="{
+        'chat': true,
+        'chat-end': item.userId === userId,
+        'chat-start': item.userId !== userId,
+      }" key={item.id}>
+        <div className="chat-header">
+          <time className="text-xs opacity-50">
+            {{ getTime(item.time) }}
+          </time>
+        </div>
+        <div :class='`animate-duration-500 animate-ease-out chat-bubble ${genColor(
+          item.userId.toString()
+        )} animate-fade-in-${item.userId === userId ? "right" : "left"
+          }${item.type === "image" ? "  max-w-sm" : ""}`'>
+          <!-- <ReactMarkdown
+                      // 图片可以点击放大
+                      components={{
+                        img: ({ node, ...props }) => (
+                          <button
+                            type="button"
+                            className="gap-1 flex flex-row items-center link link-hover"
+                            onClick={() => {
+                              if (typeof window !== "undefined") {
+                                window.open(props.src);
+                              }
+                            }}
+                          >
+                            <i className="i-tabler-photo" />
+                            查看图片
+                          </button>
+                          // <img
+                          //   className="min-w-8 min-h-8 w-full my-2 rounded hover:shadow-xl cursor-pointer transition-all scale-100 hover:scale-110 hover:rounded-xl"
+                          //   src={props.src}
+                          //   onClick={() => {
+                          //     if (typeof window !== "undefined") {
+                          //       window.open(props.src);
+                          //     }
+                          //   }}
+                          // />
+                        ),
+                        code: ({
+                          node,
+                          inline,
+                          className,
+                          children,
+                          ...props
+                        }) => {
+                          const match = /language-(\w+)/.exec(className || "");
+                          return !inline && match ? (
+                            <CodeBlock language={match[1]}>
+                              {String(children).replace(/\n$/, "")}
+                            </CodeBlock>
+                          ) : (
+                            <CodeBlock language={"js"}>
+                              {String(children).replace(/\n$/, "")}
+                            </CodeBlock>
+                          );
+                        },
+                        a: ({
+                          node,
+                          // inline,
+                          className,
+                          children,
+                          ...props
+                        }) => {
+                          return (
+                            <div className="flex flex-row gap-1 items-center">
+                              {/* 链接图标 */}
+                              <svg
+                                // 颜色
+                                className={
+                                  (item.userId === userId
+                                    ? "text-primary-content"
+                                    : "text-base-content") + " fill-current"
+                                }
+                                viewBox="0 0 1024 1024"
+                                version="1.1"
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="16"
+                                height="16"
+                              >
+                                <path d="M573.44 640a187.68 187.68 0 0 1-132.8-55.36L416 560l45.28-45.28 24.64 24.64a124.32 124.32 0 0 0 170.08 5.76l1.44-1.28a49.44 49.44 0 0 0 4-3.84l101.28-101.28a124.16 124.16 0 0 0 0-176l-1.92-1.92a124.16 124.16 0 0 0-176 0l-51.68 51.68a49.44 49.44 0 0 0-3.84 4l-20 24.96-49.92-40L480 276.32a108.16 108.16 0 0 1 8.64-9.28l51.68-51.68a188.16 188.16 0 0 1 266.72 0l1.92 1.92a188.16 188.16 0 0 1 0 266.72l-101.28 101.28a112 112 0 0 1-8.48 7.84 190.24 190.24 0 0 1-125.28 48z"></path>
+                                <path
+                                  d="M350.72 864a187.36 187.36 0 0 1-133.28-55.36l-1.92-1.92a188.16 188.16 0 0 1 0-266.72l101.28-101.28a112 112 0 0 1 8.48-7.84 188.32 188.32 0 0 1 258.08 7.84L608 464l-45.28 45.28-24.64-24.64A124.32 124.32 0 0 0 368 478.88l-1.44 1.28a49.44 49.44 0 0 0-4 3.84l-101.28 101.28a124.16 124.16 0 0 0 0 176l1.92 1.92a124.16 124.16 0 0 0 176 0l51.68-51.68a49.44 49.44 0 0 0 3.84-4l20-24.96 50.08 40-20.8 25.12a108.16 108.16 0 0 1-8.64 9.28l-51.68 51.68A187.36 187.36 0 0 1 350.72 864z"
+                                  p-id="4051"
+                                ></path>
+                              </svg>
+                              <a
+                                className="link-hover"
+                                target="_blank"
+                                // 下载
+                                download={
+                                  item.content.indexOf("api/chat/file") > 0 &&
+                                  children
+                                }
+                                {...props}
+                              >
+                                {children}
+                              </a>
+                            </div>
+                          );
+                        },
+                      }}
+                    >
+                      {item.content}
+                    </ReactMarkdown> -->
+          {{ item.content }}
+        </div>
+      </div>
+    </div>
     <form @submit.prevent="sendMessage"
       class="flex items-center gap-2 justify-center fixed bottom-0 left-0 right-0 bg-base-200 bg-opacity-75 p-4 shadow-lg">
       <input type="text" class="input flex-1" v-model="messageContent" placeholder="输入消息">

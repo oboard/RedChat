@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -17,8 +18,14 @@ const expirationTime = time.Hour * 24 * 30 // 30 天
 var rdb *redis.Client
 
 func init() {
+	// 从环境变量中获取 REDIS_ADDR，如果没有则使用默认值 "localhost:6379"
+	redisAddr := "localhost:6379"
+	if envRedisAddr := os.Getenv("REDIS_ADDR"); envRedisAddr != "" {
+		redisAddr = envRedisAddr
+	}
+
 	rdb = redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
+		Addr:     redisAddr,
 		Password: "",
 		DB:       0,
 	})
@@ -45,14 +52,6 @@ func handleWebSocket(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "userId is required"})
 		return
 	}
-
-	// 获取参与的会话 ID
-	// conversationID := getConversationIdByUserId(c, userId)
-
-	// if conversationID == "" {
-	// 	c.JSON(400, gin.H{"error": "no conversation found for this user"})
-	// 	return
-	// }
 
 	conversationIds := getConversationsByUserId(c, userId)
 	conversationKeys := make([]string, len(conversationIds))
@@ -145,6 +144,16 @@ func handleWebSocket(c *gin.Context) {
 	}
 }
 
+func getUsersByConversation(c *gin.Context, conversationID string) []string {
+	key := fmt.Sprintf("conversation:%s:users", conversationID)
+	users, err := rdb.SMembers(c, key).Result()
+	if err != nil {
+		fmt.Println("获取会话参与者失败：", err)
+		return nil
+	}
+	return users
+}
+
 func getChatHistory(c *gin.Context) {
 	conversationID := c.Query("conversationId")
 	if conversationID == "" {
@@ -161,7 +170,7 @@ func getChatHistory(c *gin.Context) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
-	var messages []Message
+	var msgs []Message
 	for _, item := range result {
 		var message Message
 		// 判断数据类型，如果是数字类型则跳过
@@ -174,9 +183,68 @@ func getChatHistory(c *gin.Context) {
 			fmt.Println("反序列化错误：", err)
 			continue
 		}
-		messages = append(messages, message)
+		msgs = append(msgs, message)
 	}
-	c.JSON(200, gin.H{"messages": messages})
+	c.JSON(200, gin.H{"msgs": msgs})
+}
+
+func createConversation(c *gin.Context) {
+	var data struct {
+		From int `json:"from"`
+		To   int `json:"to"`
+	}
+	if err := c.ShouldBindJSON(&data); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	// fromUserId := data.from
+	// toUserId := data.to
+	// 小的为from，大的为 to
+	fromUserId := data.From
+	toUserId := data.To
+	// 打印
+	fmt.Println("fromUserId:", fromUserId)
+	fmt.Println("toUserId:", toUserId)
+	if fromUserId > toUserId {
+		fromUserId, toUserId = toUserId, fromUserId
+	}
+	// 打印
+	fmt.Println("fromUserId:", fromUserId)
+	fmt.Println("toUserId:", toUserId)
+	// 检查用户 ID 是否存在
+
+	// if rdb.Exists(c, fmt.Sprintf("user:%d:*", fromUserId)).Val() == 0 {
+	// 	c.JSON(400, gin.H{"error": fmt.Sprintf("user:%d", fromUserId)})
+	// 	return
+	// }
+	// if rdb.Exists(c, fmt.Sprintf("user:%d", toUserId)).Val() == 0 {
+	// 	c.JSON(400, gin.H{"error": "userId2 not found"})
+	// 	return
+	// }
+	// 生成新的会话 ID
+	// conversationID := uuid.New().String()
+	conversationID := fmt.Sprintf("%dT%d", fromUserId, toUserId)
+	// 将会话 ID 存储到两个用户的哈希表中
+	user1Key := fmt.Sprintf("user:%d:conversations", fromUserId)
+	user2Key := fmt.Sprintf("user:%d:conversations", toUserId)
+	err := rdb.HSet(c, user1Key, conversationID, "1").Err()
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	err = rdb.HSet(c, user2Key, conversationID, "1").Err()
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	// 将会话 ID 存储到会话的用户列表中
+	key1 := fmt.Sprintf("conversation:%s:users", conversationID)
+	err = rdb.SAdd(c, key1, fromUserId, toUserId).Err()
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"conversationId": conversationID})
 }
 
 func joinConversation(c *gin.Context) {
@@ -292,6 +360,7 @@ func main() {
 		v1.Use(Cors())
 		v1.GET("/ws", handleWebSocket)
 		v1.GET("/history", getChatHistory)
+		v1.POST("/create", createConversation)
 		v1.POST("/join", joinConversation)
 		v1.POST("/leave", leaveConversation)
 		v1.GET("/list", getUserConversations)
