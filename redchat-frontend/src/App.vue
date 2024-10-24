@@ -85,7 +85,7 @@ const sendMessage = () => {
   };
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify(message));
-    messages.value = { ...messages.value, ...{ [message.uuid]: message } };
+    // messages.value = { ...messages.value, ...{ [message.uuid]: message } };
     messageContent.value = '';
   } else {
     console.error('WebSocket 连接未打开，无法发送消息。');
