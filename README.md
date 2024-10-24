@@ -9,33 +9,24 @@
 
 ## 三、安装与运行
 1. 确保已经安装了以下软件：
-   - Node.js 和 npm（用于前端开发）
+   - Node.js 和 npm（用于前端开发）或者 Bun
    - Go（用于后端开发）
    - Redis（用于消息存储和推送）
 2. 克隆项目到本地：
    ```
    git clone https://github.com/oboard/RedChat.git
    ```
-3. 安装前端依赖：
-   ```
-   cd RedChat/redchat-frontend
-   npm install
-   ```
-4. 安装后端依赖：
-   ```
-   cd RedChat
-   go mod download
-   ```
-5. 启动 Redis 服务：
+3. 启动 Redis 服务：
    ```
    redis-server
    ```
-6. 运行后端服务：
+4. 运行后端服务：
    ```
    cd RedChat
+   go mod download
    go run main.go
    ```
-7. 运行前端服务：
+5. 运行前端服务：
    ```
    cd RedChat/redchat-frontend
    bun install
