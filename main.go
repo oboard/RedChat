@@ -83,6 +83,12 @@ func handleWebSocket(c *gin.Context) {
 				fmt.Println("发送 WebSocket 消息失败：", err)
 				break
 			}
+			// 清空 user:%s:msgs
+			err = rdb.Del(c, fmt.Sprintf("user:%s:msgs", userId)).Err()
+			if err != nil {
+				fmt.Printf("清空 user:%s:msgs 失败：", err)
+				break
+			}
 		}
 	}()
 
