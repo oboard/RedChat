@@ -38,7 +38,8 @@
 7. 运行前端服务：
    ```
    cd RedChat/redchat-frontend
-   npm run serve
+   bun install
+   bun dev
    ```
 
 ## 四、功能介绍
