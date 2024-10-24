@@ -53,12 +53,6 @@ func handleWebSocket(c *gin.Context) {
 		return
 	}
 
-	conversationIds := getConversationsByUserId(c, userId)
-	conversationKeys := make([]string, len(conversationIds))
-	for i, conversationId := range conversationIds {
-		conversationKeys[i] = fmt.Sprintf("conversation:%s", conversationId)
-	}
-
 	ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		fmt.Println("升级为 WebSocket 失败：", err)
@@ -66,7 +60,7 @@ func handleWebSocket(c *gin.Context) {
 	}
 	defer ws.Close()
 
-	pubsub := rdb.Subscribe(c, conversationKeys...)
+	pubsub := rdb.Subscribe(c, fmt.Sprintf("user:%s:msgs", userId))
 	defer pubsub.Close()
 
 	ch := pubsub.Channel()
@@ -84,13 +78,10 @@ func handleWebSocket(c *gin.Context) {
 				continue
 			}
 
-			// 检查消息接收者是否在当前会话中
-			if isUserInConversation(c, message.UserID, message.ConversationID) {
-				err = ws.WriteMessage(websocket.TextMessage, []byte(msg.Payload))
-				if err != nil {
-					fmt.Println("发送 WebSocket 消息失败：", err)
-					break
-				}
+			err = ws.WriteMessage(websocket.TextMessage, []byte(msg.Payload))
+			if err != nil {
+				fmt.Println("发送 WebSocket 消息失败：", err)
+				break
 			}
 		}
 	}()
@@ -115,20 +106,23 @@ func handleWebSocket(c *gin.Context) {
 			continue
 		}
 		key := fmt.Sprintf("conversation:%s", msg.ConversationID)
-		err = rdb.Publish(c, key, jsonMsg).Err()
+		err = rdb.RPush(c, key, jsonMsg).Err()
 		if err != nil {
 			fmt.Println("发布消息到 Redis 错误：", err)
 			continue
 		}
-		err = rdb.RPush(c, key, jsonMsg).Err()
-		if err != nil {
-			fmt.Println("存储历史消息失败：", err)
-		} else {
-			// 设置一个月后过期
-			expiration := expirationTime
-			err = rdb.Expire(c, key, expiration).Err()
+		// 将消息发布到 user:userId:msgs
+		users := getUsersByConversation(c, msg.ConversationID)
+		if users == nil {
+			fmt.Println("获取会话参与者失败：", err)
+			continue
+		}
+		for _, user := range users {
+			userKey := fmt.Sprintf("user:%s:msgs", user)
+			err = rdb.Publish(c, userKey, jsonMsg).Err()
 			if err != nil {
-				fmt.Println("设置过期时间失败：", err)
+				fmt.Println("发布消息到 Redis 错误：", err)
+				continue
 			}
 		}
 		jsonMsg, err = json.Marshal(msg)
@@ -161,11 +155,7 @@ func getChatHistory(c *gin.Context) {
 		return
 	}
 	key := fmt.Sprintf("conversation:%s", conversationID)
-	// 使用 Redis 的 SORT 命令对列表进行排序
-	result, err := rdb.Sort(c, key, &redis.Sort{
-		By:    "time:*",
-		Order: "ASC",
-	}).Result()
+	result, err := rdb.LRange(c, key, 0, -1).Result()
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
