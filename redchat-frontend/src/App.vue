@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, nextTick } from 'vue';
 import Modal from './components/modal.vue';
-const serverHost = import.meta.env.VITE_SERVER_HOST;
+const serverUrl = import.meta.env.VITE_SERVER_URL;
+const wsUrl = import.meta.env.VITE_WS_URL;
 
 import { LRUCache } from 'lru-cache'
 const messageCache = new LRUCache({ max: 500, ttl: 1000 * 60 * 5, });
@@ -52,7 +53,7 @@ let socket: WebSocket | null = null;
 
 // 连接 WebSocket 的函数
 const connectWebSocket = () => {
-  socket = new WebSocket(`ws://${serverHost}/api/v1/ws?userId=${userId.value}`);
+  socket = new WebSocket(`${wsUrl}/api/v1/ws?userId=${userId.value}`);
   socket.onopen = () => {
     reload();
   };
@@ -77,7 +78,7 @@ const connectWebSocket = () => {
 };
 
 const fetch2 = (input: string, init?: RequestInit): Promise<Response> => {
-  return fetch(`http://${serverHost}/api/v1` + input, init);
+  return fetch(`${serverUrl}/api/v1` + input, init);
 }
 
 const genColor = (uuid: number) => {
