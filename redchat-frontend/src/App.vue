@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, nextTick } from 'vue';
 import Modal from './components/modal.vue';
-const serverHost = '127.0.0.1:8080';
+const serverHost = window.location.hostname + ':8080';
 
 import { LRUCache } from 'lru-cache'
 const messageCache = new LRUCache({ max: 500, ttl: 1000 * 60 * 5, });
@@ -65,7 +65,7 @@ const connectWebSocket = () => {
         userConversations.value.push(message.convId);
       }
       // 存入缓存
-      messageCache.set(message.convId, { ...messageCache.get(message.convId) || {},...{ [message.uuid]: message } });
+      messageCache.set(message.convId, { ...messageCache.get(message.convId) || {}, ...{ [message.uuid]: message } });
       unreads.value = { ...unreads.value, ...{ [message.convId]: (unreads.value[message.convId] || 0) + 1 } };
     }
   };
