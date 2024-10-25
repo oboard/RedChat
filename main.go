@@ -36,7 +36,7 @@ type Message struct {
 	UUID           string `json:"uuid"`
 	Content        string `json:"content"`
 	UserID         int    `json:"userId"`
-	ConversationID string `json:"conversationId"`
+	ConversationID string `json:"convId"`
 	Time           string `json:"time"`
 	Type           string `json:"type"`
 }
@@ -117,11 +117,19 @@ func handleWebSocket(c *gin.Context) {
 			fmt.Println("序列化消息错误：", err)
 			continue
 		}
-		key := fmt.Sprintf("conversation:%s", msg.ConversationID)
+		key := fmt.Sprintf("conv:%s", msg.ConversationID)
 		err = rdb.RPush(c, key, jsonMsg).Err()
 		if err != nil {
-			fmt.Println("发布消息到 Redis 错误：", err)
+			fmt.Println("存储历史消息失败：", err)
 			continue
+		} else {
+			// 设置一个月后过期
+			expiration := expirationTime
+			err = rdb.Expire(c, key, expiration).Err()
+			if err != nil {
+				fmt.Println("设置过期时间失败：", err)
+				continue
+			}
 		}
 		// 将消息发布到 user:userId:msgs
 		users := getUsersByConversation(c, msg.ConversationID)
@@ -141,7 +149,7 @@ func handleWebSocket(c *gin.Context) {
 }
 
 func getUsersByConversation(c *gin.Context, conversationID string) []string {
-	key := fmt.Sprintf("conversation:%s:users", conversationID)
+	key := fmt.Sprintf("conv:%s:users", conversationID)
 	users, err := rdb.SMembers(c, key).Result()
 	if err != nil {
 		fmt.Println("获取会话参与者失败：", err)
@@ -151,12 +159,12 @@ func getUsersByConversation(c *gin.Context, conversationID string) []string {
 }
 
 func getChatHistory(c *gin.Context) {
-	conversationID := c.Query("conversationId")
+	conversationID := c.Query("convId")
 	if conversationID == "" {
 		c.JSON(400, gin.H{"error": "conversationId is required"})
 		return
 	}
-	key := fmt.Sprintf("conversation:%s", conversationID)
+	key := fmt.Sprintf("conv:%s", conversationID)
 	result, err := rdb.LRange(c, key, 0, -1).Result()
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -217,8 +225,8 @@ func createConversation(c *gin.Context) {
 	// conversationID := uuid.New().String()
 	conversationID := fmt.Sprintf("%dT%d", fromUserId, toUserId)
 	// 将会话 ID 存储到两个用户的哈希表中
-	user1Key := fmt.Sprintf("user:%d:conversations", fromUserId)
-	user2Key := fmt.Sprintf("user:%d:conversations", toUserId)
+	user1Key := fmt.Sprintf("user:%d:convs", fromUserId)
+	user2Key := fmt.Sprintf("user:%d:convs", toUserId)
 	err := rdb.HSet(c, user1Key, conversationID, "1").Err()
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -230,13 +238,13 @@ func createConversation(c *gin.Context) {
 		return
 	}
 	// 将会话 ID 存储到会话的用户列表中
-	key1 := fmt.Sprintf("conversation:%s:users", conversationID)
+	key1 := fmt.Sprintf("conv:%s:users", conversationID)
 	err = rdb.SAdd(c, key1, fromUserId, toUserId).Err()
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(200, gin.H{"conversationId": conversationID})
+	c.JSON(200, gin.H{"convId": conversationID})
 }
 
 func joinConversation(c *gin.Context) {
@@ -247,20 +255,20 @@ func joinConversation(c *gin.Context) {
 		return
 	}
 	// 将用户 ID 加入到会话的用户列表中
-	key := fmt.Sprintf("conversation:%s:users", conversationID)
+	key := fmt.Sprintf("conv:%s:users", conversationID)
 	err := rdb.SAdd(c, key, userId).Err()
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
 	// 将会话 ID 存储到用户的哈希表中
-	userKey := fmt.Sprintf("user:%s:conversations", userId)
+	userKey := fmt.Sprintf("user:%s:convs", userId)
 	err = rdb.HSet(c, userKey, conversationID, "1").Err()
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(200, gin.H{"message": "joined conversation successfully"})
+	c.JSON(200, gin.H{"message": "joined conv successfully"})
 }
 
 func leaveConversation(c *gin.Context) {
@@ -271,34 +279,34 @@ func leaveConversation(c *gin.Context) {
 		return
 	}
 	// 从会话的用户列表中移除用户 ID
-	key := fmt.Sprintf("conversation:%s:users", conversationID)
+	key := fmt.Sprintf("conv:%s:users", conversationID)
 	err := rdb.SRem(c, key, userId).Err()
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
 	// 从用户的哈希表中移除会话 ID
-	userKey := fmt.Sprintf("user:%s:conversations", userId)
+	userKey := fmt.Sprintf("user:%s:convs", userId)
 	err = rdb.HDel(c, userKey, conversationID).Err()
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(200, gin.H{"message": "left conversation successfully"})
+	c.JSON(200, gin.H{"message": "left conv successfully"})
 }
 
-func isUserInConversation(c *gin.Context, userID int, conversationID string) bool {
-	key := fmt.Sprintf("conversation:%s:users", conversationID)
-	isMember, err := rdb.SIsMember(c, key, fmt.Sprintf("%d", userID)).Result()
-	if err != nil {
-		fmt.Println("检查用户是否在会话中错误：", err)
-		return false
-	}
-	return isMember
-}
+// func isUserInConversation(c *gin.Context, userID int, conversationID string) bool {
+// 	key := fmt.Sprintf("conv:%s:users", conversationID)
+// 	isMember, err := rdb.SIsMember(c, key, fmt.Sprintf("%d", userID)).Result()
+// 	if err != nil {
+// 		fmt.Println("检查用户是否在会话中错误：", err)
+// 		return false
+// 	}
+// 	return isMember
+// }
 
 func getConversationsByUserId(c *gin.Context, userId string) []string {
-	key := fmt.Sprintf("user:%s:conversations", userId)
+	key := fmt.Sprintf("user:%s:convs", userId)
 	ids, err := rdb.HKeys(c, key).Result()
 	if err != nil {
 		fmt.Println("获取用户会话 ID 错误：", err)
@@ -315,10 +323,10 @@ func getUserConversations(c *gin.Context) {
 	}
 	ids := getConversationsByUserId(c, userId)
 	if ids == nil {
-		c.JSON(500, gin.H{"error": "no conversations found for this user"})
+		c.JSON(500, gin.H{"error": "no convs found for this user"})
 		return
 	}
-	c.JSON(200, gin.H{"conversations": ids})
+	c.JSON(200, gin.H{"convs": ids})
 }
 
 func Cors() gin.HandlerFunc {
