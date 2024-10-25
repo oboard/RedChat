@@ -15,6 +15,7 @@ import (
 )
 
 const expirationTime = time.Hour * 24 * 30 // 30 天
+const messagesCountLimit = 1000
 
 var rdb *redis.Client
 
@@ -131,6 +132,14 @@ func handleWebSocket(c *gin.Context) {
 				continue
 			}
 		}
+		// 如果消息数量超过 1000 则只留最后 1000 个
+		if rdb.LLen(c, key).Val() > messagesCountLimit {
+			err = rdb.LPop(c, key).Err()
+			if err != nil {
+				fmt.Println("截取历史消息失败：", err)
+				continue
+			}
+		}
 		// 将消息发布到 user:userId:msgs
 		users := getUsersByConversation(c, msg.ConversationID)
 		if users == nil {
@@ -165,7 +174,9 @@ func getChatHistory(c *gin.Context) {
 		return
 	}
 	key := fmt.Sprintf("conv:%s", conversationID)
-	result, err := rdb.LRange(c, key, 0, -1).Result()
+	// result, err := rdb.LRange(c, key, 0, -1).Result()
+	// 最多给 100 条历史消息
+	result, err := rdb.LRange(c, key, -100, -1).Result()
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -349,11 +360,11 @@ func Cors() gin.HandlerFunc {
 }
 
 func main() {
-	router := gin.Default()
+	r := gin.Default()
 
 	// 处理 WebSocket 连接，包括发送和订阅消息
 	// 加一层路由/api/v1
-	v1 := router.Group("api/v1")
+	v1 := r.Group("api/v1")
 	{
 
 		// 允许跨域请求
@@ -366,7 +377,7 @@ func main() {
 		v1.GET("/list", getUserConversations)
 	}
 
-	// redchat-frontend/dist 扫描静态文件目录
+	r.Use(RateLimitMiddleware)
 
-	router.Run(":8080")
+	r.Run(":8080")
 }

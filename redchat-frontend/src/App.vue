@@ -51,6 +51,8 @@ watch(currentConversationId, async () => {
 // WebSocket 连接对象
 let socket: WebSocket | null = null;
 
+const messagesCountLimit = 200;
+
 // 连接 WebSocket 的函数
 const connectWebSocket = () => {
   socket = new WebSocket(`${wsUrl}/api/v1/ws?userId=${userId.value}`);
@@ -61,14 +63,18 @@ const connectWebSocket = () => {
     const message = JSON.parse(event.data);
     if (message.convId === currentConversationId.value) {
       messages.value = { ...messages.value, ...{ [message.uuid]: message } };
+      const entries = Object.entries(messages.value);
+      if (entries.length > messagesCountLimit) {
+        messages.value = Object.fromEntries(entries.slice(-messagesCountLimit));
+      }
     } else {
       if (!userConversations.value.includes(message.convId)) {
         userConversations.value.push(message.convId);
       }
-      // 存入缓存
-      messageCache.set(message.convId, { ...messageCache.get(message.convId) || {}, ...{ [message.uuid]: message } });
       unreads.value = { ...unreads.value, ...{ [message.convId]: (unreads.value[message.convId] || 0) + 1 } };
     }
+    // 存入缓存
+    messageCache.set(message.convId, { ...messageCache.get(message.convId) || {}, ...{ [message.uuid]: message } });
   };
   socket.onclose = () => {
     // 连接关闭时尝试重新连接
@@ -280,12 +286,12 @@ onMounted(async () => {
 
     <ul class="w-full flex-1 space-y-2">
       <li v-for="conversation in userConversations" :key="conversation" class="w-full">
-        <div class="indicator">
+        <div class="indicator w-full">
           <span :class="{
             'indicator-item badge badge-primary': unreads[conversation] > 0,
             'hidden': (unreads[conversation] || 0) === 0
           }">{{ unreads[conversation] || 0 }}</span>
-          <label class=" btn pl-2 label cursor-pointer h-fit">
+          <label class="btn pl-2 label cursor-pointer h-fit w-full">
             <span class="label-text">{{ conversation }}</span>
             <input type="radio" name="radio-10" class="radio checked:bg-blue-500" v-model="currentConversationId"
               :value="conversation" />
