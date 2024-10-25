@@ -87,23 +87,23 @@ const fetch2 = (input: string, init?: RequestInit): Promise<Response> => {
   return fetch(`${serverUrl}/api/v1` + input, init);
 }
 
-const genColor = (uuid: number) => {
-  if (uuid == undefined || uuid == null) {
-    return "";
-  }
-  const seed = uuid;
-  const colors = [
-    "chat-bubble-primary",
-    "chat-bubble-secondary",
-    "chat-bubble-accent",
-    "chat-bubble-neutral",
-    "chat-bubble-success",
-    "chat-bubble-warning",
-    "chat-bubble-error",
-  ];
-  const color = colors[seed % 7];
-  return color;
-}
+// const genColor = (uuid: number) => {
+//   if (uuid == undefined || uuid == null) {
+//     return "";
+//   }
+//   const seed = uuid;
+//   const colors = [
+//     "chat-bubble-primary",
+//     "chat-bubble-secondary",
+//     "chat-bubble-accent",
+//     "chat-bubble-neutral",
+//     "chat-bubble-success",
+//     "chat-bubble-warning",
+//     "chat-bubble-error",
+//   ];
+//   const color = colors[seed % 7];
+//   return color;
+// }
 
 
 // 发送消息方法
