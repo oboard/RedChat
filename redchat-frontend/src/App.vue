@@ -325,8 +325,8 @@ onMounted(async () => {
           > -->
         <div :class="{
           'text-wrap break-words animate-duration-500 animate-ease-out chat-bubble': true,
-          [`chat-bubble-${genColor(item.userId)}`]: true,
-          'chat-bubble-right': item.userId === userId,
+          // [`${genColor(item.userId)}`]: true,
+          'chat-bubble-right chat-bubble-success': item.userId === userId,
           'chat-bubble-left': item.userId !== userId,
         }">
           <!-- <ReactMarkdown
