@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue';
+import { ref, onMounted, watch, nextTick } from 'vue';
+import Modal from './components/modal.vue';
 const serverHost = '127.0.0.1:8080';
 
 // 从 URL 查询参数中获取 conversationId
@@ -22,10 +23,24 @@ const messageContent = ref('');
 // const joinConversationId = ref('');
 const userConversations = ref<string[]>([]);
 const currentConversationId = ref('');
+const unreads = ref<Record<string, number>>({});
 
-watch(currentConversationId, () => {
+// 页面滚动到底部的函数
+const toBottom = () => {
+  window.scrollTo(0, document.body.scrollHeight);
+}
+
+const reload = async () => {
+  await getChatHistory();
+  unreads.value[currentConversationId.value] = 0;
+  if (window !== undefined) {
+    toBottom();
+  }
+}
+
+watch(currentConversationId, async () => {
   if (currentConversationId) {
-    getChatHistory();
+    reload();
   }
 });
 
@@ -36,11 +51,18 @@ let socket: WebSocket | null = null;
 const connectWebSocket = () => {
   socket = new WebSocket(`ws://${serverHost}/api/v1/ws?userId=${userId.value}`);
   socket.onopen = () => {
-    getChatHistory();
+    reload();
   };
   socket.onmessage = event => {
     const message = JSON.parse(event.data);
-    messages.value = { ...messages.value, ...{ [message.uuid]: message } };
+    if (message.conversationId === currentConversationId.value) {
+      messages.value = { ...messages.value, ...{ [message.uuid]: message } };
+    } else {
+      if (!userConversations.value.includes(message.conversationId)) {
+        userConversations.value.push(message.conversationId);
+      }
+      unreads.value = { ...unreads.value, ...{ [message.conversationId]: (unreads.value[message.conversationId] || 0) + 1 } };
+    }
   };
   socket.onclose = () => {
     // 连接关闭时尝试重新连接
@@ -53,11 +75,11 @@ const fetch2 = (input: string, init?: RequestInit): Promise<Response> => {
   return fetch(`http://${serverHost}/api/v1` + input, init);
 }
 
-const genColor = (uuid: string) => {
-  if (uuid == undefined || uuid == null || uuid.length < 5) {
+const genColor = (uuid: number) => {
+  if (uuid == undefined || uuid == null) {
     return "";
   }
-  const seed = Number.parseInt(uuid.replace(/-/g, "").slice(0, 8), 16);
+  const seed = uuid;
   const colors = [
     "chat-bubble-primary",
     "chat-bubble-secondary",
@@ -85,15 +107,59 @@ const sendMessage = () => {
   };
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify(message));
-    // messages.value = { ...messages.value, ...{ [message.uuid]: message } };
+    messages.value = { ...messages.value, ...{ [message.uuid]: message } };
     messageContent.value = '';
   } else {
     console.error('WebSocket 连接未打开，无法发送消息。');
   }
+  nextTick(toBottom);
 };
 
-const getChatHistory = () => {
-  fetch2(`/history?conversationId=${currentConversationId.value}`)
+
+const modalTitle = ref<string>("");
+const promptModal = ref<boolean>(false);
+const confirmModal = ref<boolean>(false);
+const inputRef = ref<HTMLInputElement>();
+const modalInput = ref<string>("");
+const promptConfrim = ref<() => void>();
+const promptCancel = ref<() => void>();
+
+
+// async function customConfirm(message: string): Promise<boolean> {
+//   modalTitle.value = message;
+//   confirmModal.value = true;
+//   return new Promise((resolve) => {
+//     promptConfrim.value = () => {
+//       resolve(true);
+//       confirmModal.value = false;
+//     }
+//     promptCancel.value = () => {
+//       resolve(false);
+//       confirmModal.value = false;
+//     }
+//   });
+// }
+
+async function customPrompt(message: string, defaultValue?: string): Promise<string | undefined> {
+  modalTitle.value = message;
+  modalInput.value = defaultValue ?? "";
+  promptModal.value = true;
+  // inputRef获取焦点
+  inputRef.value?.focus();
+  return new Promise((resolve) => {
+    promptConfrim.value = () => {
+      resolve(modalInput.value);
+      promptModal.value = false;
+    };
+    promptCancel.value = () => {
+      resolve(undefined);
+      promptModal.value = false;
+    };
+  });
+}
+
+const getChatHistory = async () => {
+  return await fetch2(`/history?conversationId=${currentConversationId.value}`)
     .then(response => response.json())
     .then(data => {
       messages.value = data.msgs?.map((message: Message) => {
@@ -150,8 +216,8 @@ const createConversation = (toUserId: number) => {
     }).catch(error => console.error('创建会话错误：', error));
 }
 
-const getUserConversations = () => {
-  fetch2(`/list?userId=${userId.value}`)
+const getUserConversations = async () => {
+  return await fetch2(`/list?userId=${userId.value}`)
     .then(response => response.json())
     .then(data => {
       userConversations.value = data.conversations || [];
@@ -159,19 +225,33 @@ const getUserConversations = () => {
     .catch(error => console.error('获取用户会话错误：', error));
 };
 
-const onCreateBtn = () => {
-  let id = prompt('请输入对方的用户 ID')
-  if (id === null) {
-
+const onCreateBtn = async () => {
+  let id = await customPrompt("请输入对方的用户 ID", "");
+  if (id === undefined) {
     return;
   }
   createConversation(Number.parseInt(id))
 }
 
 // 生命周期钩子
-onMounted(() => {
+onMounted(async () => {
+
+  while (!userId.value) {
+    let id = await customPrompt("请输入用户 ID", "")
+    if (id !== undefined) {
+      userId.value = Number.parseInt(id);
+      // 在 url 中添加 userId
+      const url = new URL(window.location.href);
+      url.searchParams.set('userId', id.toString());
+      window.history.replaceState({}, '', url.href);
+    }
+  }
+
+  await getUserConversations();
+  if (userConversations.value.length > 0) {
+    currentConversationId.value = userConversations.value[0];
+  }
   connectWebSocket();
-  getUserConversations();
 });
 </script>
 
@@ -183,15 +263,21 @@ onMounted(() => {
 
     <ul class="w-full flex-1 space-y-2">
       <li v-for="conversation in userConversations" :key="conversation" class="w-full">
-        <label class="btn pl-2 label cursor-pointer h-fit">
-          <span class="label-text">{{ conversation }}</span>
-          <input type="radio" name="radio-10" class="radio checked:bg-blue-500" v-model="currentConversationId"
-            :value="conversation" />
-        </label>
+        <div class="indicator">
+          <span :class="{
+            'indicator-item badge badge-primary': unreads[conversation] > 0,
+            'hidden': (unreads[conversation] || 0) === 0
+          }">{{ unreads[conversation] || 0 }}</span>
+          <label class=" btn pl-2 label cursor-pointer h-fit">
+            <span class="label-text">{{ conversation }}</span>
+            <input type="radio" name="radio-10" class="radio checked:bg-blue-500" v-model="currentConversationId"
+              :value="conversation" />
+          </label>
+        </div>
       </li>
     </ul>
   </div>
-  <div class="absolute top-4 pb-[100px] pl-[calc(25%+32px)] w-full">
+  <div class="top-4 pb-[100px] pl-[calc(25%)] w-full">
     <div className="chatbox w-full">
       <div v-for="item of messages" :class="{
         'chat': true,
@@ -200,11 +286,11 @@ onMounted(() => {
       }" key={item.id}>
         <div className="chat-header">
           <time className="text-xs opacity-50">
-            {{ getTime(item.time) }}
+            {{ getTime(new Date(item.time).getTime()) }}
           </time>
         </div>
         <div :class='`animate-duration-500 animate-ease-out chat-bubble ${genColor(
-          item.userId.toString()
+          item.userId
         )} animate-fade-in-${item.userId === userId ? "right" : "left"
           }${item.type === "image" ? "  max-w-sm" : ""}`'>
           <!-- <ReactMarkdown
@@ -314,6 +400,14 @@ onMounted(() => {
       </button>
     </form>
   </div>
+
+
+  <Modal v-model="promptModal" :title="modalTitle" @confirm="promptConfrim" @cancel="promptCancel">
+    <input ref="inputRef" type="text" id="folderName" v-model="modalInput" class="input input-bordered w-full mt-4"
+      @keydown.enter="promptConfrim" :placeholder="modalTitle" />
+  </Modal>
+  <Modal v-model="confirmModal" :title="modalTitle" @confirm="promptConfrim" @cancel="promptCancel">
+  </Modal>
 </template>
 
 <style scoped>

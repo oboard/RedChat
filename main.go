@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -40,6 +41,8 @@ type Message struct {
 	Type           string `json:"type"`
 }
 
+var writeLock sync.Mutex // 写入互斥锁
+
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		return true
@@ -64,6 +67,7 @@ func handleWebSocket(c *gin.Context) {
 	defer pubsub.Close()
 
 	ch := pubsub.Channel()
+	// 启动一个 goroutine 读取 Redis 发布的消息
 	go func() {
 		for msg := range ch {
 			var message Message
@@ -77,8 +81,9 @@ func handleWebSocket(c *gin.Context) {
 				fmt.Println("反序列化错误：", err)
 				continue
 			}
-
+			writeLock.Lock()
 			err = ws.WriteMessage(websocket.TextMessage, []byte(msg.Payload))
+			writeLock.Unlock()
 			if err != nil {
 				fmt.Println("发送 WebSocket 消息失败：", err)
 				break
@@ -92,6 +97,7 @@ func handleWebSocket(c *gin.Context) {
 		}
 	}()
 
+	// 循环读取 WebSocket 消息
 	for {
 		_, messageBytes, err := ws.ReadMessage()
 		if err != nil {
@@ -130,16 +136,6 @@ func handleWebSocket(c *gin.Context) {
 				fmt.Println("发布消息到 Redis 错误：", err)
 				continue
 			}
-		}
-		jsonMsg, err = json.Marshal(msg)
-		if err != nil {
-			fmt.Println("重新序列化消息错误：", err)
-			continue
-		}
-		err = ws.WriteMessage(websocket.TextMessage, []byte(jsonMsg))
-		if err != nil {
-			fmt.Println("发送更新后的 WebSocket 消息失败：", err)
-			break
 		}
 	}
 }
