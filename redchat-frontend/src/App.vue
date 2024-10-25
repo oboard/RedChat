@@ -225,6 +225,9 @@ const createConversation = (toUserId: number) => {
     method: 'POST',
   }).then(response => response.json())
     .then(data => {
+      if (userConversations.value.includes(data?.convId)) {
+        return;
+      }
       userConversations.value.push(`${data?.convId}`);
     }).catch(error => console.error('创建会话错误：', error));
 }
