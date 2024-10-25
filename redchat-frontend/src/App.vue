@@ -108,6 +108,11 @@ const genColor = (uuid: number) => {
 
 // 发送消息方法
 const sendMessage = () => {
+  // 字数不能超过 650
+  if (messageContent.value.length > 650) {
+    customConfirm('字数不能超过 650');
+    return;
+  }
   const message = {
     content: messageContent.value,
     userId: userId.value,
@@ -137,20 +142,20 @@ const promptConfrim = ref<() => void>();
 const promptCancel = ref<() => void>();
 
 
-// async function customConfirm(message: string): Promise<boolean> {
-//   modalTitle.value = message;
-//   confirmModal.value = true;
-//   return new Promise((resolve) => {
-//     promptConfrim.value = () => {
-//       resolve(true);
-//       confirmModal.value = false;
-//     }
-//     promptCancel.value = () => {
-//       resolve(false);
-//       confirmModal.value = false;
-//     }
-//   });
-// }
+async function customConfirm(message: string): Promise<boolean> {
+  modalTitle.value = message;
+  confirmModal.value = true;
+  return new Promise((resolve) => {
+    promptConfrim.value = () => {
+      resolve(true);
+      confirmModal.value = false;
+    }
+    promptCancel.value = () => {
+      resolve(false);
+      confirmModal.value = false;
+    }
+  });
+}
 
 async function customPrompt(message: string, defaultValue?: string): Promise<string | undefined> {
   modalTitle.value = message;
@@ -312,10 +317,18 @@ onMounted(async () => {
             {{ getTime(new Date(item.time).getTime()) }}
           </time>
         </div>
-        <div :class='`animate-duration-500 animate-ease-out chat-bubble ${genColor(
+        <!-- <div 
+        :class='`animate-duration-500 animate-ease-out chat-bubble ${genColor(
           item.userId
         )} animate-fade-in-${item.userId === userId ? "right" : "left"
-          }${item.type === "image" ? "  max-w-sm" : ""}`'>
+          }${item.type === "image" ? "  max-w-sm" : ""}`'
+          > -->
+        <div :class="{
+          'text-wrap break-words animate-duration-500 animate-ease-out chat-bubble': true,
+          [`chat-bubble-${genColor(item.userId)}`]: true,
+          'chat-bubble-right': item.userId === userId,
+          'chat-bubble-left': item.userId !== userId,
+        }">
           <!-- <ReactMarkdown
                       // 图片可以点击放大
                       components={{

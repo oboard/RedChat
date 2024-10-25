@@ -118,6 +118,10 @@ func handleWebSocket(c *gin.Context) {
 			fmt.Println("序列化消息错误：", err)
 			continue
 		}
+		// 信息长度不能超过 650 字
+		if len(msg.Content) > 650 {
+			continue
+		}
 		key := fmt.Sprintf("conv:%s", msg.ConversationID)
 		err = rdb.RPush(c, key, jsonMsg).Err()
 		if err != nil {
