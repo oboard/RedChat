@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, nextTick } from 'vue';
 import Modal from './components/modal.vue';
-const serverHost = window.location.hostname + ':8080';
+const serverHost = import.meta.env.VITE_SERVER_HOST;
 
 import { LRUCache } from 'lru-cache'
 const messageCache = new LRUCache({ max: 500, ttl: 1000 * 60 * 5, });
