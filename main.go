@@ -261,6 +261,40 @@ func joinOrLeaveConversation(c *gin.Context, action string) {
 	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("%sed conversation successfully", action)})
 }
 
+// 获取对话信息（成员和名称）
+func getConversationInfo(c *gin.Context, convId string) (Conversation, error) {
+	// 获取对话的成员信息
+	memberStrings, err := rdb.SMembers(c, fmt.Sprintf("conv:%s:users", convId)).Result()
+	if err != nil {
+		return Conversation{}, err
+	}
+
+	// 将成员信息转换为 int 类型
+	var members []int
+	for _, member := range memberStrings {
+		userIDInt, err := strconv.Atoi(member)
+		if err != nil {
+			fmt.Println("Error converting userID to int:", err)
+			continue
+		}
+		members = append(members, userIDInt)
+	}
+
+	// 获取对话名称
+	metaKey := fmt.Sprintf("conv:%s:meta", convId)
+	name, err := rdb.HGet(c, metaKey, "name").Result()
+	if err != nil {
+		return Conversation{}, err
+	}
+
+	return Conversation{
+		ID:      convId,
+		Members: members,
+		Name:    name,
+	}, nil
+}
+
+// 获取用户参与的对话列表
 func getConversationsByUser(c *gin.Context) {
 	userId := c.Query("userId")
 	if userId == "" {
@@ -278,34 +312,37 @@ func getConversationsByUser(c *gin.Context) {
 
 	var conversations []Conversation
 	for _, convId := range conversationIDs {
-		// 获取对话的成员信息
-		memberStrings, _ := rdb.SMembers(c, fmt.Sprintf("conv:%s:users", convId)).Result()
-
-		// 将成员信息转换为 int 类型
-		var members []int
-		for _, member := range memberStrings {
-			// 假设成员是以字符串的方式存储，我们需要将其转换为 int 类型
-			userIDInt, err := strconv.Atoi(member)
-			if err != nil {
-				fmt.Println("Error converting userID to int:", err)
-				continue
-			}
-			members = append(members, userIDInt)
+		conv, err := getConversationInfo(c, convId)
+		if err != nil {
+			fmt.Println("Error retrieving conversation info:", err)
+			continue
 		}
-
-		// 获取对话名称
-		metaKey := fmt.Sprintf("conv:%s:meta", convId)
-		name, _ := rdb.HGet(c, metaKey, "name").Result()
-
-		conversations = append(conversations, Conversation{
-			ID:      convId,
-			Members: members,
-			Name:    name,
-		})
+		conversations = append(conversations, conv)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"convs": conversations,
+	})
+}
+
+// 获取单个对话的元数据（成员和名称）
+func getConversation(c *gin.Context) {
+	convId := c.DefaultQuery("convId", "") // 获取 convId 查询参数
+	if convId == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "convId is required"})
+		return
+	}
+
+	conv, err := getConversationInfo(c, convId)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch conversation information"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"id":      conv.ID,
+		"members": conv.Members,
+		"name":    conv.Name,
 	})
 }
 
@@ -366,5 +403,6 @@ func main() {
 	v1.POST("/leave", func(c *gin.Context) { joinOrLeaveConversation(c, "leave") })
 	v1.GET("/list", getConversationsByUser)
 	v1.POST("/rename", renameConversation)
+	v1.GET("/conv", getConversation)
 	r.Run(":8080")
 }

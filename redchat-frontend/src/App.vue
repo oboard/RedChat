@@ -74,8 +74,12 @@ const connectWebSocket = () => {
         messages.value = Object.fromEntries(entries.slice(-messagesCountLimit));
       }
     } else {
-      if (!userConversations.value.includes(message.convId)) {
-        userConversations.value.push(message.convId);
+      if (!userConversations.value.map(i => i.id).includes(message.convId)) {
+        fetch2(`/conv?convId=${message.convId}`).then(response => response.json())
+          .then(data => {
+            console.log(data);
+            userConversations.value.push(data);
+          });
       }
       unreads.value = { ...unreads.value, ...{ [message.convId]: (unreads.value[message.convId] || 0) + 1 } };
     }
