@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
@@ -56,8 +57,9 @@ type Message struct {
 
 // Conversation 定义对话结构
 type Conversation struct {
-	ID      string   `json:"id"`
-	Members []string `json:"members"`
+	ID      string `json:"id"`
+	Members []int  `json:"members"`
+	Name    string `json:"name"`
 }
 
 // WebSocket处理函数
@@ -192,24 +194,46 @@ func getChatHistory(c *gin.Context) {
 	})
 }
 
-// 创建对话
 func createConversation(c *gin.Context) {
 	var data struct {
-		From int `json:"from"`
-		To   int `json:"to"`
+		Name    string `json:"name"`    // 对话名称
+		Members []int  `json:"members"` // 支持多个成员
 	}
 	if err := c.ShouldBindJSON(&data); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
 		return
 	}
-	if data.From > data.To {
-		data.From, data.To = data.To, data.From
+
+	// 验证 `Members` 和 `Name`
+	if len(data.Members) < 2 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "At least two members are required"})
+		return
+	}
+	if data.Name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Conversation name is required"})
+		return
 	}
 
-	conversationID := fmt.Sprintf("%dT%d", data.From, data.To)
-	rdb.SAdd(c, fmt.Sprintf("conv:%s:users", conversationID), data.From, data.To)
-	c.JSON(http.StatusOK, gin.H{"convId": conversationID})
+	// 生成唯一的对话 ID
+	conversationID := uuid.New().String()
+
+	// 存储对话的用户列表
+	memberKeys := make([]interface{}, len(data.Members))
+	for i, member := range data.Members {
+		memberKeys[i] = member
+		userKey := fmt.Sprintf("user:%d:convs", member)
+		rdb.HSet(c, userKey, conversationID, 1)
+	}
+	rdb.SAdd(c, fmt.Sprintf("conv:%s:users", conversationID), memberKeys...)
+	// 存储对话的名称
+	rdb.HSet(c, fmt.Sprintf("conv:%s:meta", conversationID), "name", data.Name)
+
+	// 返回对话 ID 和名称
+	c.JSON(http.StatusOK, gin.H{
+		"id": conversationID,
+	})
 }
+
 func joinOrLeaveConversation(c *gin.Context, action string) {
 	userId := c.Query("userId")
 	conversationID := c.Query("conversationId")
@@ -255,16 +279,67 @@ func getConversationsByUser(c *gin.Context) {
 	var conversations []Conversation
 	for _, convId := range conversationIDs {
 		// 获取对话的成员信息
-		members, _ := rdb.SMembers(c, fmt.Sprintf("conv:%s:users", convId)).Result()
+		memberStrings, _ := rdb.SMembers(c, fmt.Sprintf("conv:%s:users", convId)).Result()
+
+		// 将成员信息转换为 int 类型
+		var members []int
+		for _, member := range memberStrings {
+			// 假设成员是以字符串的方式存储，我们需要将其转换为 int 类型
+			userIDInt, err := strconv.Atoi(member)
+			if err != nil {
+				fmt.Println("Error converting userID to int:", err)
+				continue
+			}
+			members = append(members, userIDInt)
+		}
+
+		// 获取对话名称
+		metaKey := fmt.Sprintf("conv:%s:meta", convId)
+		name, _ := rdb.HGet(c, metaKey, "name").Result()
+
 		conversations = append(conversations, Conversation{
 			ID:      convId,
 			Members: members,
+			Name:    name,
 		})
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"conversations": conversations,
+		"convs": conversations,
 	})
+}
+
+// 修改对话名称
+func renameConversation(c *gin.Context) {
+	var data struct {
+		ConversationID string `json:"conversationId"`
+		NewName        string `json:"newName"`
+	}
+	if err := c.ShouldBindJSON(&data); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+		return
+	}
+	if data.ConversationID == "" || data.NewName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "conversationId and newName are required"})
+		return
+	}
+
+	// 检查对话是否存在
+	convKey := fmt.Sprintf("conv:%s:users", data.ConversationID)
+	exists, err := rdb.Exists(c, convKey).Result()
+	if err != nil || exists == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Conversation not found"})
+		return
+	}
+
+	// 更新对话名称
+	metaKey := fmt.Sprintf("conv:%s:meta", data.ConversationID)
+	if err := rdb.HSet(c, metaKey, "name", data.NewName).Err(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Conversation renamed successfully"})
 }
 
 func Cors() gin.HandlerFunc {
@@ -290,5 +365,6 @@ func main() {
 	v1.POST("/join", func(c *gin.Context) { joinOrLeaveConversation(c, "join") })
 	v1.POST("/leave", func(c *gin.Context) { joinOrLeaveConversation(c, "leave") })
 	v1.GET("/list", getConversationsByUser)
+	v1.POST("/rename", renameConversation)
 	r.Run(":8080")
 }

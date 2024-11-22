@@ -21,11 +21,17 @@ interface Message {
   status: number;
 }
 
+interface Conversation {
+  id: string;
+  members: number[];
+  name: string;
+}
+
 // 数据
 const messages = ref<Record<string, Message>>({});
 const messageContent = ref('');
 // const joinConversationId = ref('');
-const userConversations = ref<string[]>([]);
+const userConversations = ref<Conversation[]>([]);
 const currentConversationId = ref('');
 const unreads = ref<Record<string, number>>({});
 
@@ -228,19 +234,52 @@ function getTime(time: number | undefined) {
   return new Date(time).toLocaleString();
 }
 
+const randomName = () => {
+  const nameArr1 = [
+    "机智的",
+    "聪明的",
+    "勤奋的",
+    "勇敢的",
+    "狡猾的",
+    "漂亮的",
+    "优雅的",
+    "可爱的",
+    "神秘的",
+    "快乐的"
+  ];
+
+  const nameArr2 = [
+    "土豆",
+    "小兔子",
+    "小猫",
+    "小狗",
+    "小猪",
+    "小牛",
+    "小羊",
+  ];
+
+  const name1 = nameArr1[Math.floor(Math.random() * nameArr1.length)];
+  const name2 = nameArr2[Math.floor(Math.random() * nameArr2.length)];
+  return `${name1}${name2}`;
+}
+
 const createConversation = (toUserId: number) => {
+  const body = {
+    members: [userId.value, toUserId],
+    name: randomName()
+  };
   fetch2('/create', {
-    body: JSON.stringify({
-      from: userId.value,
-      to: toUserId,
-    }),
+    body: JSON.stringify(body),
     method: 'POST',
   }).then(response => response.json())
     .then(data => {
-      if (userConversations.value.includes(data?.convId)) {
+      if (userConversations.value.includes(data?.id)) {
         return;
       }
-      userConversations.value.push(`${data?.convId}`);
+      userConversations.value.push(
+        {
+          ...body, id: data?.id,
+        });
     }).catch(error => console.error('创建会话错误：', error));
 }
 
@@ -248,6 +287,7 @@ const getUserConversations = async () => {
   return await fetch2(`/list?userId=${userId.value}`)
     .then(response => response.json())
     .then(data => {
+      console.log(data);
       userConversations.value = data.convs || [];
     })
     .catch(error => console.error('获取用户会话错误：', error));
@@ -277,7 +317,7 @@ onMounted(async () => {
 
   await getUserConversations();
   if (userConversations.value.length > 0) {
-    currentConversationId.value = userConversations.value[0];
+    currentConversationId.value = userConversations.value[0].id;
   }
   connectWebSocket();
 });
@@ -290,16 +330,16 @@ onMounted(async () => {
     <button type="button" class="btn btn-primary btn-circle text-xl" @click="onCreateBtn"> + </button>
 
     <ul class="w-full flex-1 space-y-2">
-      <li v-for="conversation in userConversations" :key="conversation" class="w-full">
+      <li v-for="conversation in userConversations" :key="conversation.id" class="w-full">
         <div class="indicator w-full">
           <span :class="{
-            'indicator-item badge badge-primary': unreads[conversation] > 0,
-            'hidden': (unreads[conversation] || 0) === 0
-          }">{{ unreads[conversation] || 0 }}</span>
+            'indicator-item badge badge-primary': unreads[conversation.id] > 0,
+            'hidden': (unreads[conversation.id] || 0) === 0
+          }">{{ unreads[conversation.id] || 0 }}</span>
           <label class="btn pl-2 label cursor-pointer h-fit w-full">
-            <span class="label-text">{{ conversation }}</span>
+            <span class="label-text">{{ conversation.name }}</span>
             <input type="radio" name="radio-10" class="radio checked:bg-blue-500" v-model="currentConversationId"
-              :value="conversation" />
+              :value="conversation.id" />
           </label>
         </div>
       </li>
