@@ -118,6 +118,12 @@ func handleWebSocketMessage(c *gin.Context, messageBytes []byte) {
 		return
 	}
 
+	// 检查发送方是否在当前会话中
+	if !isUserInConversation(c, msg.UserID, msg.ConversationID) {
+		fmt.Println("Sender not in conversation")
+		return
+	}
+
 	// 设置消息时间
 	msg.Time = time.Now().Format(time.RFC3339)
 	jsonMsg, _ := json.Marshal(msg)
@@ -134,6 +140,16 @@ func handleWebSocketMessage(c *gin.Context, messageBytes []byte) {
 	for _, user := range getUsersByConversation(c, msg.ConversationID) {
 		rdb.Publish(c, fmt.Sprintf("user:%s:msgs", user), jsonMsg)
 	}
+}
+
+// 检查用户是否属于会话
+func isUserInConversation(c *gin.Context, userID int, conversationID string) bool {
+	isMember, err := rdb.SIsMember(c, fmt.Sprintf("conv:%s:users", conversationID), userID).Result()
+	if err != nil {
+		fmt.Println("Error checking user membership:", err)
+		return false
+	}
+	return isMember
 }
 
 // 获取对话中的用户列表

@@ -7,6 +7,8 @@ const wsUrl = import.meta.env.VITE_WS_URL;
 import { LRUCache } from 'lru-cache'
 const messageCache = new LRUCache({ max: 500, ttl: 1000 * 60 * 5, });
 
+import CryptoJS from 'crypto-js';
+
 // 从 URL 查询参数中获取 conversationId
 const urlParams = new URLSearchParams(window.location.search);
 const userId = ref(Number.parseFloat(urlParams.get('userId') ?? '0') || 0);
@@ -14,7 +16,7 @@ const userId = ref(Number.parseFloat(urlParams.get('userId') ?? '0') || 0);
 interface Message {
   content: string;
   userId: number;
-  convId: string;
+  convId?: string;
   time: string;
   uuid: string;
   type: string;
@@ -67,6 +69,7 @@ const connectWebSocket = () => {
   };
   socket.onmessage = event => {
     const message = JSON.parse(event.data);
+    console.log(message);
     if (message.convId === currentConversationId.value) {
       messages.value = { ...messages.value, ...{ [message.uuid]: message } };
       const entries = Object.entries(messages.value);
@@ -123,13 +126,15 @@ const sendMessage = () => {
     customConfirm('字数不能超过 650');
     return;
   }
+  const convId = currentConversationId.value;
+  const content = CryptoJS.AES.encrypt(messageContent.value, convId).toString();
   const message = {
-    content: messageContent.value,
+    content,
     userId: userId.value,
-    convId: currentConversationId.value,
+    convId,
     time: new Date().toISOString(),
     uuid: Math.random().toString(36).substring(2, 9),
-    type: 'chat',
+    type: 'text',
     status: 1 // 设置初始状态为 sending
   };
   if (socket && socket.readyState === WebSocket.OPEN) {
@@ -186,21 +191,24 @@ async function customPrompt(message: string, defaultValue?: string): Promise<str
 }
 
 const getChatHistory = async () => {
-  if (messageCache.has(currentConversationId.value)) {
+  const convId = currentConversationId.value;
+  if (messageCache.has(convId)) {
     // 如果缓存中有当前会话的历史消息，直接使用缓存数据
-    messages.value = messageCache.get(currentConversationId.value) as Record<string, Message>;
+    messages.value = messageCache.get(convId) as Record<string, Message>;
   } else {
     // 如果缓存中没有，从服务器获取并缓存起来
-    return await fetch2(`/history?convId=${currentConversationId.value}`)
+    return await fetch2(`/history?convId=${convId}`)
       .then(response => response.json())
       .then(data => {
         const formattedMessages = data.msgs?.map((message: Message) => {
           message.status = 0; // 设置状态为已接收
+          message.convId = convId;
           return message;
         }) || {};
         messages.value = formattedMessages;
+        console.log('获取历史聊天记录成功：', formattedMessages);
         // 将获取到的消息缓存起来
-        messageCache.set(currentConversationId.value, formattedMessages);
+        messageCache.set(convId, formattedMessages);
       })
       .catch(error => console.error('获取历史聊天记录错误：', error));
   }
@@ -465,7 +473,7 @@ onMounted(async () => {
                     >
                       {item.content}
                     </ReactMarkdown> -->
-          {{ item.content }}
+          {{ CryptoJS.AES.decrypt(item.content, item.convId ?? "").toString(CryptoJS.enc.Utf8) }}
         </div>
       </div>
     </div>
